@@ -43,7 +43,8 @@ parser.add_argument('--sim_size', type=int, default=200, help='number of sim_img
 parser.add_argument('--file_d', type=str, default='', help='path of data file')
 parser.add_argument('--file_c', type=str, default='', help='path of cls file')
 parser.add_argument('--file_t', type=str, default='', help='path of tech file')
-parser.add_argument('--ncls', type=int, default=4, help='number of clusters')
+parser.add_argument('--ct_ncls', type=int, default=4, help='number of cell type clusters')
+parser.add_argument('--tech_ncls', type=int, default=4, help='number of technology clusters')
 parser.add_argument('--knn_k', type=int, default=10, help='neighbors used')
 parser.add_argument('--lr_rate', type=int, default=10, help='rate for slow learning')
 parser.add_argument('--threshold', type=float, default=0.01, help='the convergence threshold')
@@ -52,7 +53,8 @@ parser.add_argument('--job_name', type=str, default="",
 parser.add_argument('--outdir', type=str, default=".", help='the directory for output.')
 
 opt = parser.parse_args()
-max_ncls = opt.ncls  #
+max_ct_ncls = opt.ct_ncls  #
+max_t_ncls = opt.tech_ncls  #
 
 job_name = opt.job_name
 GANs_models = opt.outdir + '/GANs_models'
@@ -113,14 +115,15 @@ class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample):
-        data, label = sample['data'], sample['label']
+        data, ct_label, tech_label = sample['data'], sample['cell_type_label'], sample['technology_label']
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C X H X W
         data = data.transpose((2, 0, 1))
 
         return {'data': torch.from_numpy(data),
-                'label': torch.from_numpy(label)
+                'cell_type_label': torch.from_numpy(ct_label),
+                'technology_label': torch.from_numpy(tech_label)
                 }
 
 
@@ -158,7 +161,15 @@ class Generator(nn.Module):
         self.conv_blocks_02p = nn.Sequential(
             #            nn.BatchNorm2d(9),
             nn.Upsample(scale_factor=opt.img_size),  # torch.Size([bs, 128, 16, 16])
-            nn.Conv2d(max_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
+            nn.Conv2d(max_ct_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
+            nn.BatchNorm2d(self.cn1 // 4),
+            nn.ReLU(),
+        )
+
+        self.conv_blocks_03p = nn.Sequential(
+            #            nn.BatchNorm2d(9),
+            nn.Upsample(scale_factor=opt.img_size),  # torch.Size([bs, 128, 16, 16])
+            nn.Conv2d(max_t_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
             nn.BatchNorm2d(self.cn1 // 4),
             nn.ReLU(),
         )
@@ -183,7 +194,7 @@ class Generator(nn.Module):
 
         technology_label = technology_label.unsqueeze(2)
         technology_label = technology_label.unsqueeze(2)
-        out03 = self.conv_blocks_02p(technology_label)  # ([4, 8, 124, 124])
+        out03 = self.conv_blocks_03p(technology_label)  # ([4, 8, 124, 124])
 
         out1 = torch.cat((out01, out02, out03), 1)
         out1 = self.conv_blocks_1(out1)
@@ -217,7 +228,7 @@ class Discriminator(nn.Module):
         self.conv_blocks02p = nn.Sequential(
             #            nn.BatchNorm2d(9),
             nn.Upsample(scale_factor=self.down_size),  # torch.Size([bs, 128, 16, 16])
-            nn.Conv2d(max_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
+            nn.Conv2d(max_ct_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
             nn.BatchNorm2d(self.cn1 // 4),
             nn.ReLU(),
         )
@@ -274,7 +285,7 @@ class Discriminator(nn.Module):
 
         technology_label = technology_label.unsqueeze(2)
         technology_label = technology_label.unsqueeze(2)
-        out03 = self.conv_blocks02p(technology_label)  # ([4, 16, 32, 32])
+        out03 = self.conv_blocks03p(technology_label)  # ([4, 16, 32, 32])
         ####
         out1 = torch.cat((out01, out02, out03), 1)
         ######
@@ -372,8 +383,10 @@ if opt.train:
             #            if i==0:
             #                break
             imgs = batch_sample['data'].type(Tensor)
-            label = batch_sample['label']
-            label_oh = one_hot((label).type(torch.LongTensor), max_ncls).type(Tensor)  #
+            cell_type_label = batch_sample['cell_type_label']
+            technology_label = batch_sample['technology_label']
+            ct_label_oh = one_hot((cell_type_label).type(torch.LongTensor), max_ct_ncls).type(Tensor)  #
+            t_label_oh = one_hot((technology_label).type(torch.LongTensor), max_t_ncls).type(Tensor)  #
 
             # Configure input
             real_imgs = Variable(imgs.type(Tensor))
@@ -388,10 +401,10 @@ if opt.train:
             z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
 
             # Generate a batch of images
-            gen_imgs = generator(z, label_oh)
+            gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
             # Loss measures generator's ability to fool the discriminator
-            g_loss = torch.mean(torch.abs(discriminator(gen_imgs, label_oh) - gen_imgs))
+            g_loss = torch.mean(torch.abs(discriminator(gen_imgs, ct_label_oh, t_label_oh) - gen_imgs))
 
             g_loss.backward()
             optimizer_G.step()
@@ -403,8 +416,8 @@ if opt.train:
             optimizer_D.zero_grad()
 
             # Measure discriminator's ability to classify real from generated samples
-            d_real = discriminator(real_imgs, label_oh)
-            d_fake = discriminator(gen_imgs.detach(), label_oh)
+            d_real = discriminator(real_imgs, ct_label_oh, t_label_oh)
+            d_fake = discriminator(gen_imgs.detach(), ct_label_oh, t_label_oh)
 
             d_loss_real = torch.mean(torch.abs(d_real - real_imgs))
             d_loss_fake = torch.mean(torch.abs(d_fake - gen_imgs.detach()))
@@ -442,19 +455,19 @@ if opt.train:
             torch.save(discriminator.state_dict(), GANs_models + '/' + model_basename + '-d.pt')
             torch.save(generator.state_dict(), GANs_models + '/' + model_basename + '-g.pt')
             dM = min(max_M - cur_M, cur_M)
-            if dM < min_dM:  # if convergence threthold meets, stop training
+            if dM < min_dM:  # if convergence threshold meets, stop training
                 print(
-                    "Training was stopped after " + str(epoch + 1) + " epoches since the convergence threthold (" + str(
+                    "Training was stopped after " + str(epoch + 1) + " epochs since the convergence threshold (" + str(
                         min_dM) + ".) reached: " + str(dM))
                 break
             cur_dM = max_M - cur_M
             max_M = cur_M
         if epoch + 1 == opt.n_epochs and cur_dM > min_dM:
-            print("Training was stopped after " + str(epoch + 1) + " epoches since the maximum epoches reached: " + str(
+            print("Training was stopped after " + str(epoch + 1) + " epochs since the maximum epochs reached: " + str(
                 opt.n_epochs) + ".")
-            print("WARNING: the convergence threthold (" + str(min_dM) + ") was not met. Current value is: " + str(
+            print("WARNING: the convergence threshold (" + str(min_dM) + ") was not met. Current value is: " + str(
                 cur_dM))
-            print("You may need more epoches to get the most optimal model!!!")
+            print("You may need more epochs to get the most optimal model!!!")
 
 if opt.impute:
     if opt.gpt == '':
@@ -480,13 +493,14 @@ if opt.impute:
     sim_size = opt.sim_size
     sim_out = list()
     for i in range(opt.ncls):
-        label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ncls).type(Tensor)
+        ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
+        t_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
 
         # Sample noise as generator input
         z = Variable(Tensor(np.random.normal(0, 1, (sim_size, opt.latent_dim))))
 
         # Generate a batch of images
-        fake_imgs = generator(z, label_oh).detach().data.cpu().numpy()
+        fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
         sim_out.append(fake_imgs)
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
@@ -500,5 +514,5 @@ if opt.impute:
     rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['label']) - 1], knn_k=opt.knn_k) for k in
             range(len(mydataset))]
     pd.DataFrame(rels).to_csv(
-        os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imped data
+        os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
 

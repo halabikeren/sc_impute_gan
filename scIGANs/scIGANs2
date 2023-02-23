@@ -11,7 +11,7 @@ batch_size=8 #
 PARAMS=""
 impute=""
 latent_dim=100
-threthold=0.001 ## the convergence threthold; traing will stop if the dM < threthold
+threshold=0.001 ## the convergence threshold; traing will stop if the dM < threshold
 job_name=""
 #e_matrix=$1 ## the first argument is the input expression matrix
 help_message (){
@@ -19,18 +19,18 @@ help_message (){
 	echo $version
     echo "--------------"
     echo ""
-    echo "USAGE: scIGANs <in.matrix.txt> [-l in.label.txt] [options]"
+    echo "USAGE: scIGANs2 <in.matrix.txt> [-tl in.tech.label.txt] [-cl in.ct.label.txt] [options]"
     echo ""
     echo "in.matrix.txt A tab-delimited text file, containing the expression counts with genes in rows and cells in columns. The first row is header and first column is gene IDs or names. <required>"
 	echo "-h | --help		show this message"
-	echo "-tl | --technology_label_file <string?	required	give the labels of the generating technologies of the scRNA-seq data, with the same order of the colounms in expression matrix"
+	echo "-tl | --technology_label_file <string>	required	give the labels of the generating technologies of the scRNA-seq data, with the same order of the colounms in expression matrix"
 	echo "-cl | --cell_type_label_file <string>	optional	give the label of cell type or subpopulation for each cell, with the same order of the colounms in expression matrix."
 	echo "-e | --epoch <integer>	optional	set the number of epochs of training. Default = 200"
 	echo "-s | --sim_size <integer>	optional	set the number of generated data for imputation. Default = 200"
 	echo "-k | --knn_k <integer>	optional	set the number of nearest neighbours used for imputation. Default = 10"
 	echo "-d | --latent_dim <integer>	optional	dimension of the latent space of generator. Default = 100"
 	echo "-b | --batch_size <integer>	optional	how many samples per batch to load. More samples per batch requires more memory. Default = 8; max=number_of_cells"
-	echo "-t | --threthold <integer>	optional	convergence threthold. Default = 0.01"
+	echo "-t | --threshold <integer>	optional	convergence threshold. Default = 0.01"
 	echo "--impute	optional	Set this option to skip training and directly impute using pretrained model for the same input settings."
 	echo "-j | --job_name <string>	optional	user-defined job name (a string without spaces), which will be used to name the output files."
 	echo "-o | --outdir <string>	optional	set the path where to write the imputed matrix. Default: current working directory (pwd)."
@@ -70,8 +70,8 @@ while (( "$#" )); do
       latent_dim=$2
       shift 2
       ;;
-    -t|--threthold)
-      threthold=$2
+    -t|--threshold)
+      threshold=$2
       shift 2
       ;;
     -j|--job_name)
@@ -149,7 +149,7 @@ fi
 echo ""
 echo "Prechecking input files..."
 echo $(date)"	Prechecking input files..." >> $logfile
-$Rscript_path ${Bashdir}/src/inpro.R ${e_matrix} $tmpdir $logfile $ct_label 2>&1 | tee -a $logfile
+$Rscript_path ${Bashdir}/src/inpro2.R ${e_matrix} $tmpdir $logfile $ct_label $tech_label_label 2>&1 | tee -a $logfile
 if [ $? -ne 0 ]
 then
 	exit 1
@@ -160,7 +160,7 @@ done < $tmpdir/args
 
 img_size=${par[0]}
 ncls=${par[1]}
-label=${par[2]}
+ct_label=${par[2]}
 
 echo ""
 if [ "$impute" == "" ]
@@ -170,15 +170,15 @@ then
 	echo $(date)"	Training..." >> $logfile
 	echo ""
 	echo "Command for training:" >> $logfile
-	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threthold=$threthold --train >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threthold=$threthold --train --job_name $job_name --outdir $outdir  #2>&1 | tee -a $logfile
+	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train >> $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train --job_name $job_name --outdir $outdir  #2>&1 | tee -a $logfile
 	echo "Imputing..."
 	echo "" >> $logfile
 	echo $(date)"	Imputing..." >> $logfile
 	echo ""
 	echo "Command for Imputing:" >> $logfile
 	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
 else
 	echo "Imputing..."
 	echo "" >> $logfile
@@ -186,7 +186,7 @@ else
 	echo ""
 	echo "Command for Imputing:" >> $logfile
 	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
 fi
 if [ $? -eq 0 ]
 then
