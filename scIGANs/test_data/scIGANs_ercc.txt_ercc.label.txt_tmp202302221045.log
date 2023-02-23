@@ -1,0 +1,20 @@
+scIGANs_0.1.2
+
+Wed Feb 22 10:45:56 IST 2023	Prechecking input files...
+Check dependent packages...
+Wed Feb 22 10:45:57 2023	Check dependent packages...
+Done!
+Wed Feb 22 10:45:58 2023	Done!
+Label file /groups/itay_mayrose/halabikeren/unsupervised_learning_final_project/scIGANs/test_data/ercc.label.txt was provided.
+Wed Feb 22 10:45:58 2023	Label file /groups/itay_mayrose/halabikeren/unsupervised_learning_final_project/scIGANs/test_data/ercc.label.txt was provided.
+
+Wed Feb 22 10:45:58 IST 2023	Training...
+Command for training:
+	--file_d=/groups/itay_mayrose/halabikeren/scIGANs_ercc.txt_ercc.label.txt_tmp202302221045/ercc.txt --file_c=/groups/itay_mayrose/halabikeren/unsupervised_learning_final_project/scIGANs/test_data/ercc.label.txt --ncls=3 --img_size=10 --n_epochs=200 --sim_size=200 --knn_k=10 --batch_size=8 --latent_dim=100 --threthold=0.001 --train
+
+Wed Feb 22 11:40:26 IST 2023	Imputing...
+Command for Imputing:
+	--file_d=/groups/itay_mayrose/halabikeren/scIGANs_ercc.txt_ercc.label.txt_tmp202302221045/ercc.txt --file_c=/groups/itay_mayrose/halabikeren/unsupervised_learning_final_project/scIGANs/test_data/ercc.label.txt --ncls=3 --img_size=10 --n_epochs=200 --sim_size=200 --knn_k=10 --latent_dim=100 --impute
+
+Completed!!! 2023-02-22 11:40:34
+Imputed matrix: /groups/itay_mayrose/halabikeren/scIGANs_ercc.txt_ercc.label.txt.txt

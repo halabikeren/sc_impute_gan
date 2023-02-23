@@ -1,0 +1,15 @@
+
+```{r}
+library("devtools")
+devtools::install_github("VCCRI/CIDR")
+library(cidr)
+```
+
+```{r}
+scData = scSimulator(N=3, k=50)
+scData_without_dropouts = scData$expectedValues
+scData_with_dropouts = scData$dropoutsSimulated
+write.csv(scData_without_dropouts, "scdata_without_dropouts.csv")
+write.csv(scData_with_dropouts, "scdata_with_dropouts.csv")
+```
+
