@@ -183,18 +183,18 @@ class Generator(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, noise, cell_type_label, technology_label):
+    def forward(self, noise, ct_label, t_label):
         out = self.l1p(noise)
         out = out.view(out.shape[0], self.cn1, opt.img_size, opt.img_size)
         out01 = self.conv_blocks_01p(out)  # ([4, 32, 124, 124])
         #
-        cell_type_label = cell_type_label.unsqueeze(2)
-        cell_type_label = cell_type_label.unsqueeze(2)
-        out02 = self.conv_blocks_02p(cell_type_label)  # ([4, 8, 124, 124])
+        ct_label = ct_label.unsqueeze(2)
+        ct_label = ct_label.unsqueeze(2)
+        out02 = self.conv_blocks_02p(ct_label)  # ([4, 8, 124, 124])
 
-        technology_label = technology_label.unsqueeze(2)
-        technology_label = technology_label.unsqueeze(2)
-        out03 = self.conv_blocks_03p(technology_label)  # ([4, 8, 124, 124])
+        t_label = t_label.unsqueeze(2)
+        t_label = t_label.unsqueeze(2)
+        out03 = self.conv_blocks_03p(t_label)  # ([4, 8, 124, 124])
 
         out1 = torch.cat((out01, out02, out03), 1)
         out1 = self.conv_blocks_1(out1)
@@ -243,19 +243,19 @@ class Discriminator(nn.Module):
 
         # Fully-connected layers
 
-        down_dim = 24 * (self.down_size) ** 2
+        down_dim = 32 * (self.down_size) ** 2
         self.fc = nn.Sequential(
             nn.Linear(down_dim, 16),
             nn.BatchNorm1d(16, 0.8),
             nn.ReLU(),
             nn.Linear(16, down_dim),
             nn.BatchNorm1d(down_dim),
-            nn.ReLU()
+            nn.ReLU(),
         )
         # Upsampling 32X32
         self.up = nn.Sequential(
             nn.Upsample(scale_factor=4),
-            nn.Conv2d(24, 16, 3, 1, 1),
+            nn.Conv2d(32, 16, 3, 1, 1),
             nn.MaxPool2d(2, 2),
             nn.BatchNorm2d(16),
             nn.ReLU(),
@@ -283,22 +283,22 @@ class Discriminator(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, img, cell_type_label, technology_label):
+    def forward(self, img, ct_label, t_label):
         out00 = self.pre(img.view((img.size()[0], -1))).view((img.size()[0], 1, self.down_size0, self.down_size0))
         out01 = self.down(out00)  # ([4, 16, 32, 32])
 
-        cell_type_label = cell_type_label.unsqueeze(2)
-        cell_type_label = cell_type_label.unsqueeze(2)
-        out02 = self.conv_blocks02p(cell_type_label)  # ([4, 16, 32, 32])
+        ct_label = ct_label.unsqueeze(2)
+        ct_label = ct_label.unsqueeze(2)
+        out02 = self.conv_blocks02p(ct_label)  # ([4, 16, 32, 32])
 
-        technology_label = technology_label.unsqueeze(2)
-        technology_label = technology_label.unsqueeze(2)
-        out03 = self.conv_blocks03p(technology_label)  # ([4, 16, 32, 32])
+        t_label = t_label.unsqueeze(2)
+        t_label = t_label.unsqueeze(2)
+        out03 = self.conv_blocks03p(t_label)  # ([4, 16, 32, 32])
         ####
         out1 = torch.cat((out01, out02, out03), 1)
         ######
         out = self.fc(out1.view(out1.size(0), -1))
-        out = self.up(out.view(out.size(0), 24, self.down_size, self.down_size))
+        out = self.up(out.view(out.size(0), 32, self.down_size, self.down_size))
         return out
 
 
@@ -412,7 +412,8 @@ if opt.train:
             gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
             # Loss measures generator's ability to fool the discriminator
-            g_loss = torch.mean(torch.abs(discriminator(gen_imgs, ct_label_oh, t_label_oh) - gen_imgs))
+            disc_on_gen_imgs = torch.abs(discriminator(gen_imgs, ct_label_oh, t_label_oh))
+            g_loss = torch.mean(disc_on_gen_imgs - gen_imgs)
 
             g_loss.backward()
             optimizer_G.step()
