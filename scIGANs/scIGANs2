@@ -149,7 +149,7 @@ fi
 echo ""
 echo "Prechecking input files..."
 echo $(date)"	Prechecking input files..." >> $logfile
-$Rscript_path ${Bashdir}/src/inpro2.R ${e_matrix} $tmpdir $logfile $ct_label $tech_label_label 2>&1 | tee -a $logfile
+$Rscript_path ${Bashdir}/src/inpro2.R ${e_matrix} $tmpdir $logfile $ct_label $tech_label 2>&1 | tee -a $logfile
 if [ $? -ne 0 ]
 then
 	exit 1
@@ -159,8 +159,10 @@ par+=($line)
 done < $tmpdir/args
 
 img_size=${par[0]}
-ncls=${par[1]}
+ct_ncls=${par[1]}
 ct_label=${par[2]}
+tech_ncls=${par[3]}
+tech_label=${par[4]}
 
 echo ""
 if [ "$impute" == "" ]
@@ -170,23 +172,23 @@ then
 	echo $(date)"	Training..." >> $logfile
 	echo ""
 	echo "Command for training:" >> $logfile
-	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train --job_name $job_name --outdir $outdir  #2>&1 | tee -a $logfile
+	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train >> $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train --job_name $job_name --outdir $outdir  #2>&1 | tee -a $logfile
 	echo "Imputing..."
 	echo "" >> $logfile
 	echo $(date)"	Imputing..." >> $logfile
 	echo ""
 	echo "Command for Imputing:" >> $logfile
-	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
 else
 	echo "Imputing..."
 	echo "" >> $logfile
 	echo $(date)"	Imputing..." >> $logfile
 	echo ""
 	echo "Command for Imputing:" >> $logfile
-	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ncls=$ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
 fi
 if [ $? -eq 0 ]
 then

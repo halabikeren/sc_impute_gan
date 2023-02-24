@@ -60,7 +60,7 @@ job_name = opt.job_name
 GANs_models = opt.outdir + '/GANs_models'
 if (job_name == ""):
     job_name = os.path.basename(opt.file_d) + "-" + os.path.basename(opt.file_c) + "-" + os.path.basename(opt.file_b)
-model_basename = job_name + "-" + str(opt.latent_dim) + "-" + str(opt.n_epochs) + "-" + str(opt.ncls)
+model_basename = job_name + "-" + str(opt.latent_dim) + "-" + str(opt.n_epochs) + "-" + str(opt.ct_ncls) + "-" + str(opt.tech_ncls)
 if os.path.isdir(GANs_models) != True:
     os.makedirs(GANs_models)
 
@@ -175,8 +175,8 @@ class Generator(nn.Module):
         )
 
         self.conv_blocks_1 = nn.Sequential(
-            nn.BatchNorm2d(40, 0.8),
-            nn.Conv2d(40, self.cn1, 3, stride=1, padding=1),  # torch.Size([bs, 1, 32, 32])
+            nn.BatchNorm2d(48, 0.8),
+            nn.Conv2d(48, self.cn1, 3, stride=1, padding=1),  # torch.Size([bs, 1, 32, 32])
             nn.BatchNorm2d(self.cn1),
             nn.ReLU(),
             nn.Conv2d(self.cn1, opt.channels, 3, stride=1, padding=1),  # torch.Size([bs, 1, 32, 32])
@@ -229,6 +229,14 @@ class Discriminator(nn.Module):
             #            nn.BatchNorm2d(9),
             nn.Upsample(scale_factor=self.down_size),  # torch.Size([bs, 128, 16, 16])
             nn.Conv2d(max_ct_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
+            nn.BatchNorm2d(self.cn1 // 4),
+            nn.ReLU(),
+        )
+        
+        self.conv_blocks03p = nn.Sequential(
+            #            nn.BatchNorm2d(9),
+            nn.Upsample(scale_factor=self.down_size),  # torch.Size([bs, 128, 16, 16])
+            nn.Conv2d(max_t_ncls, self.cn1 // 4, 3, stride=1, padding=1),  # torch.Size([bs, 128, 16, 16])
             nn.BatchNorm2d(self.cn1 // 4),
             nn.ReLU(),
         )
@@ -492,16 +500,17 @@ if opt.impute:
     ######################################################
     sim_size = opt.sim_size
     sim_out = list()
-    for i in range(opt.ncls):
-        ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
-        t_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
-
-        # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (sim_size, opt.latent_dim))))
-
-        # Generate a batch of images
-        fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
-        sim_out.append(fake_imgs)
+    for i in range(opt.ct_ncls):
+      ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
+      for j in range(opt.tech_ncls):
+          t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
+  
+          # Sample noise as generator input
+          z = Variable(Tensor(np.random.normal(0, 1, (sim_size, opt.latent_dim))))
+  
+          # Generate a batch of images
+          fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
+          sim_out.append(fake_imgs)
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
                           tech_file=opt.file_t)
