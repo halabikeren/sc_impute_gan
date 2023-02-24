@@ -46,7 +46,7 @@ parser.add_argument('--file_c', type=str, default='', help='path of cls file')
 parser.add_argument('--ncls', type=int, default=4, help='number of clusters')
 parser.add_argument('--knn_k', type=int, default=10, help='neighbors used')
 parser.add_argument('--lr_rate', type=int, default=10, help='rate for slow learning')
-parser.add_argument('--threshold', type=float, default=0.01, help='the convergence threthold')
+parser.add_argument('--threthold', type=float, default=0.01, help='the convergence threthold')
 parser.add_argument('--job_name', type=str, default="", help='the user-defined job name, which will be used to name the output files.')
 parser.add_argument('--outdir', type=str, default=".", help='the directory for output.')
 
@@ -175,8 +175,7 @@ class Generator(nn.Module):
         label_oh=label_oh.unsqueeze(2)
         label_oh=label_oh.unsqueeze(2)  
         out02 = self.conv_blocks_02p(label_oh) #([4, 8, 124, 124])
-        
-       
+
         out1=torch.cat((out01,out02),1)
         out1=self.conv_blocks_1(out1)
         return out1
