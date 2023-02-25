@@ -503,6 +503,7 @@ if opt.impute:
     sim_out = list()
     for i in range(opt.ct_ncls):
       ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
+      sim_out.append(list())
       for j in range(opt.tech_ncls):
           t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
   
@@ -511,7 +512,7 @@ if opt.impute:
   
           # Generate a batch of images
           fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
-          sim_out.append(fake_imgs)
+          sim_out[i].append(fake_imgs)
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
                           tech_file=opt.file_t)
@@ -521,7 +522,7 @@ if opt.impute:
 
     # by type
     sim_out_org = sim_out
-    rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['label']) - 1], knn_k=opt.knn_k) for k in
+    rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['cell_type_label']) - 1][int(mydataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in
             range(len(mydataset))]
     pd.DataFrame(rels).to_csv(
         os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
