@@ -69,6 +69,35 @@ img_shape = (opt.channels, opt.img_size, opt.img_size)
 cuda = True if torch.cuda.is_available() else False
 
 
+def dropout_indicator(self, scData, shape=1, percentile=65):
+    """
+    This is similar to Splat package
+    Input:
+    scData can be the output of simulator or any refined version of it
+    (e.g. with technical noise)
+    shape: the shape of the logistic function
+    percentile: the mid-point of logistic functions is set to the given percentile
+    of the input scData
+    returns: np.array containing binary indactors showing dropouts
+    """
+    scData = np.array(scData)
+    scData_log = np.log(np.add(scData, 1))
+    log_mid_point = np.percentile(scData_log, percentile)
+    prob_ber = np.true_divide(1, 1 + np.exp(-1 * shape * (scData_log - log_mid_point)))
+
+    binary_ind = np.random.binomial(n=1, p=prob_ber)
+
+    return binary_ind
+
+
+def convert_to_UMIcounts(self, scData):
+    """
+    Input: scData can be the output of simulator or any refined version of it
+    (e.g. with technical noise)
+    """
+
+    return np.random.poisson(scData)
+
 # %% for debug use only
 # opt.file_d='ercc.csv'
 # opt.file_c='ercc.label.txt'
@@ -411,9 +440,15 @@ if opt.train:
             # Generate a batch of images
             gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
+            # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
+            # transformed_gen_imgs = # transform back to matrix
+            # binary_ind = dropout_indicator(transformed_gen_imgs, shape, percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
+            # expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
+            # dropped_gen_imgs = # transpose back to dim of gen_imgs
+
             # Loss measures generator's ability to fool the discriminator
-            disc_on_gen_imgs = torch.abs(discriminator(gen_imgs, ct_label_oh, t_label_oh))
-            g_loss = torch.mean(disc_on_gen_imgs - gen_imgs)
+            disc_on_gen_imgs = torch.abs(discriminator(dropped_gen_imgs, ct_label_oh, t_label_oh))
+            g_loss = torch.mean(disc_on_gen_imgs - dropped_gen_imgs)
 
             g_loss.backward()
             optimizer_G.step()
@@ -426,10 +461,10 @@ if opt.train:
 
             # Measure discriminator's ability to classify real from generated samples
             d_real = discriminator(real_imgs, ct_label_oh, t_label_oh)
-            d_fake = discriminator(gen_imgs.detach(), ct_label_oh, t_label_oh)
+            d_fake = discriminator(dropped_gen_imgs.detach(), ct_label_oh, t_label_oh)
 
             d_loss_real = torch.mean(torch.abs(d_real - real_imgs))
-            d_loss_fake = torch.mean(torch.abs(d_fake - gen_imgs.detach()))
+            d_loss_fake = torch.mean(torch.abs(d_fake - dropped_gen_imgs.detach()))
             d_loss = d_loss_real - k * d_loss_fake
 
             d_loss.backward()
