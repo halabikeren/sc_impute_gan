@@ -70,7 +70,7 @@ img_shape = (opt.channels, opt.img_size, opt.img_size)
 cuda = True if torch.cuda.is_available() else False
 
 
-def dropout_indicator(self, scData, shape=1, percentile=65):
+def dropout_indicator(scData, shape=1, percentile=65):
     """
     This is similar to Splat package
     Input:
@@ -122,7 +122,7 @@ class MyDataset(Dataset):
         d = pd.read_csv(cls_file, header=None, index_col=False)  #
         t = pd.read_csv(tech_file, header=None, index_col=False)  #
         self.data_cls = pd.Categorical(d.iloc[:, 0]).codes  #
-        self.data_technology = pd.Categorical(d.iloc[:, 0]).codes
+        self.data_technology = pd.Categorical(t.iloc[:, 0]).codes
         self.transform = transform
         self.fig_h = opt.img_size  ##
 
