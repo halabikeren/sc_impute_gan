@@ -436,11 +436,11 @@ if opt.train:
 
             optimizer_G.zero_grad()
 
-            # Sample noise as generator input
-            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
+            # define the input data as input for the generator (x)
+            x = Variable(imgs.type(Tensor)).reshape((imgs.shape[0], opt.latent_dim))
 
             # Generate a batch of images
-            gen_imgs = generator(z, ct_label_oh, t_label_oh)
+            gen_imgs = generator(x, ct_label_oh, t_label_oh)
 
             # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
             transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
@@ -448,8 +448,6 @@ if opt.train:
             expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
             stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
             dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
-            dropped_gen_imgs = gen_imgs
-
             # Loss measures generator's ability to fool the discriminator
             disc_on_gen_imgs = torch.abs(discriminator(dropped_gen_imgs, ct_label_oh, t_label_oh))
             g_loss = torch.mean(disc_on_gen_imgs - dropped_gen_imgs)
@@ -545,11 +543,10 @@ if opt.impute:
       for j in range(opt.tech_ncls):
           t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
   
-          # Sample noise as generator input
-          z = Variable(Tensor(np.random.normal(0, 1, (sim_size, opt.latent_dim))))
-  
+          # x is the input data
+          x = Variable(imgs.type(Tensor)).reshape((imgs.shape[0], opt.latent_dim))
           # Generate a batch of images
-          fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
+          fake_imgs = generator(x, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
           sim_out[i].append(fake_imgs)
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
