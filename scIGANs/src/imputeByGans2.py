@@ -544,6 +544,7 @@ if opt.impute:
           t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
 
           # Sample noise as generator input
+          imgs = transformed_dataset.data["data"]
           z = Variable(Tensor(np.random.choice(a=imgs.flatten(), size=sim_size*opt.latent_dim).reshape(sim_size, opt.latent_dim)))
 
           # Generate a batch of images
