@@ -120,7 +120,6 @@ class MyDataset(Dataset):
                 on a sample.
         """
         self.data = pd.read_csv(d_file, header=0, index_col=0)
-        print(f"data shape = {self.data.shape}")
         d = pd.read_csv(cls_file, header=None, index_col=False)  #
         t = pd.read_csv(tech_file, header=None, index_col=False)  #
         self.data_cls = pd.Categorical(d.iloc[:, 0]).codes  #
@@ -447,12 +446,8 @@ if opt.train:
             transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
             binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
             expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
-            expr_O_L_D_components = []
-            idx_vals = range(expr_O_L_D.shape[1])
-            for idx in idx_vals:
-                expr_O_L_D_components.append(expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double'))  #
-            expr_O_L_D = torch.from_numpy(np.array(expr_O_L_D_components))
-            dropped_gen_imgs = expr_O_L_D
+            stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
+            dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
             dropped_gen_imgs = gen_imgs
 
             # Loss measures generator's ability to fool the discriminator
