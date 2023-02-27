@@ -51,6 +51,8 @@ parser.add_argument('--threshold', type=float, default=0.01, help='the convergen
 parser.add_argument('--job_name', type=str, default="",
                     help='the user-defined job name, which will be used to name the output files.')
 parser.add_argument('--outdir', type=str, default=".", help='the directory for output.')
+parser.add_argument('--dropout_shape', type=int, default=1, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
+parser.add_argument('--dropout_percentile', type=int, default=65, help='the percentile under which gene expression values are more likely to be dropped out')
 
 opt = parser.parse_args()
 max_ct_ncls = opt.ct_ncls  #
@@ -79,7 +81,7 @@ def dropout_indicator(scData, shape=1, percentile=65):
     shape: the shape of the logistic function
     percentile: the mid-point of logistic functions is set to the given percentile
     of the input scData
-    returns: np.array containing binary indactors showing dropouts
+    returns: np.array containing binary indicators showing dropouts
     """
     scData = np.array(scData)
     scData_log = np.log(np.add(scData, 1))
@@ -91,12 +93,11 @@ def dropout_indicator(scData, shape=1, percentile=65):
     return binary_ind
 
 
-def convert_to_UMIcounts(self, scData):
+def convert_to_UMIcounts(scData):
     """
     Input: scData can be the output of simulator or any refined version of it
     (e.g. with technical noise)
     """
-
     return np.random.poisson(scData)
 
 # %% for debug use only
@@ -119,6 +120,7 @@ class MyDataset(Dataset):
                 on a sample.
         """
         self.data = pd.read_csv(d_file, header=0, index_col=0)
+        print(f"data shape = {self.data.shape}")
         d = pd.read_csv(cls_file, header=None, index_col=False)  #
         t = pd.read_csv(tech_file, header=None, index_col=False)  #
         self.data_cls = pd.Categorical(d.iloc[:, 0]).codes  #
@@ -441,11 +443,16 @@ if opt.train:
             # Generate a batch of images
             gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
-            # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
-            # transformed_gen_imgs = # transform back to matrix
-            # binary_ind = dropout_indicator(transformed_gen_imgs, shape, percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
-            # expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
-            # dropped_gen_imgs = # transpose back to dim of gen_imgs
+            # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
+            transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
+            binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
+            expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
+            expr_O_L_D_components = []
+            idx_vals = range(expr_O_L_D.shape[1])
+            for idx in idx_vals:
+                expr_O_L_D_components.append(expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double'))  #
+            expr_O_L_D = torch.from_numpy(np.array(expr_O_L_D_components))
+            dropped_gen_imgs = expr_O_L_D
             dropped_gen_imgs = gen_imgs
 
             # Loss measures generator's ability to fool the discriminator
@@ -552,6 +559,8 @@ if opt.impute:
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
                           tech_file=opt.file_t)
+    print(f"# cells = {len(mydataset)}")
+    print(f"# size of a single cell = {mydataset[0]['data'].shape}")
     data_imp_org = np.asarray(
         [mydataset[i]['data'].reshape((opt.img_size * opt.img_size)) for i in range(len(mydataset))]).T
     data_imp = data_imp_org.copy()
