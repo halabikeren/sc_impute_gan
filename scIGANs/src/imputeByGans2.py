@@ -134,9 +134,9 @@ class MyDataset(Dataset):
         # use astype('double/float') to sovle the runtime error caused by data mismatch.
         data = self.data.iloc[:, idx].values[0:(self.fig_h * self.fig_h), ].reshape(self.fig_h, self.fig_h, 1).astype(
             'double')  #
-        cell_type_label = np.array(self.data_cls[idx]).astype('int32')  #
-        technology_label = np.array(self.data_technology[idx]).astype('int32')  #
-        sample = {'data': data, 'cell_type_label': cell_type_label, 'technology_label': technology_label}
+        ct_label = np.array(self.data_cls[idx]).astype('int32')  #
+        tech_label = np.array(self.data_technology[idx]).astype('int32')  #
+        sample = {'data': data, 'cell_type_label': ct_label, 'technology_label': tech_label}
         if self.transform:
             sample = self.transform(sample)
         return sample
@@ -214,8 +214,8 @@ class Generator(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, noise, ct_label, t_label):
-        out = self.l1p(noise)
+    def forward(self, x, ct_label, t_label):
+        out = self.l1p(x)
         out = out.view(out.shape[0], self.cn1, opt.img_size, opt.img_size)
         out01 = self.conv_blocks_01p(out)  # ([4, 32, 124, 124])
         #
@@ -436,11 +436,11 @@ if opt.train:
 
             optimizer_G.zero_grad()
 
-            # define the input data as input for the generator (x)
-            x = Variable(imgs.type(Tensor)).reshape((imgs.shape[0], opt.latent_dim))
+            # Sample noise as generator input
+            z = Variable(Tensor(np.random.choice(a=imgs.flatten(), size=imgs.shape[0]*opt.latent_dim).reshape(imgs.shape[0], opt.latent_dim)))
 
             # Generate a batch of images
-            gen_imgs = generator(x, ct_label_oh, t_label_oh)
+            gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
             # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
             transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
@@ -520,7 +520,7 @@ if opt.impute:
         model_exists = os.path.isfile(model_g)
         if not model_exists:
             print("ERROR: There is no model exists with the given settings for your data.")
-            print("Please set --train instead of --impute to train a model fisrt.")
+            print("Please set --train instead of --impute to train a model first.")
             sys.exit("scIGANs stopped!!!")  # if model exists and do not want to train again, exit the program
             print()
     else:
@@ -542,11 +542,12 @@ if opt.impute:
       sim_out.append(list())
       for j in range(opt.tech_ncls):
           t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
-  
-          # x is the input data
-          x = Variable(imgs.type(Tensor)).reshape((imgs.shape[0], opt.latent_dim))
+
+          # Sample noise as generator input
+          z = Variable(Tensor(np.random.choice(a=imgs.flatten(), size=sim_size*opt.latent_dim).reshape(sim_size, opt.latent_dim)))
+
           # Generate a batch of images
-          fake_imgs = generator(x, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
+          fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
           sim_out[i].append(fake_imgs)
     mydataset = MyDataset(d_file=opt.file_d,
                           cls_file=opt.file_c,
