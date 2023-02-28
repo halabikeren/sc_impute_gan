@@ -140,11 +140,14 @@ class MyPartitions:
             if partition_method == 1:
                 random.shuffle(shuffled_gene_indices)
             full_data_to_partition = full_data.iloc[shuffled_gene_indices]
+            covered_indices = []
             for i in range(0, n_genes, partition_jump):
                 data = full_data_to_partition.iloc[i:i+partition_size, :]
                 gene_indices = data.index.tolist()
+                covered_indices += gene_indices
                 dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
                 partition.append((dataset, gene_indices))
+            assert(len(set(covered_indices)) == len(set(shuffled_gene_indices)))
             print(f"created {len(partition):,} partitions for repeat {rep}...")
             self.partitions.append(partition)
 
@@ -418,8 +421,6 @@ transformed_datasets_partitions = MyPartitions(d_file=opt.file_d,
                                                nrepeats=opt.partitions_nreps,
                                                overlap_size=opt.partitions_overlap_size,
                                                transform=transforms.Compose([
-                                                    #                                               Rescale(256),
-                                                    #                                               RandomCrop(224),
                                                     ToTensor()
                                                 ]))
 
@@ -629,5 +630,6 @@ if opt.impute:
     full_imputed_data = pd.concat(imputed_datasets)
     full_imputed_data = full_imputed_data.reset_index()
     full_imputed_data = full_imputed_data.groupby('index').mean()
-    full_imputed_data.to_csv(os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv', header=None, index=False)  # imputed data
+    full_imputed_data = full_imputed_data.transpose()
+    full_imputed_data.to_csv(os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
 
