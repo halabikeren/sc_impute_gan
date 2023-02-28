@@ -3,23 +3,20 @@
 from __future__ import print_function, division
 import argparse
 import os
+import random
+
 import numpy as np
 import pandas as pd
-import math
 import sys
 import torchvision.transforms as transforms
-from torchvision.utils import save_image
-from torch.utils.data import DataLoader
-from torchvision import datasets
 from torch.autograd import Variable
 import torch.nn as nn
-import torch.nn.functional as F
 import torch
-import torch.autograd as autograd
 from torch.utils.data import Dataset, DataLoader
-from joblib import Parallel, delayed
-import multiprocessing
-from datetime import datetime
+
+OMP_NUM_THREADS=1
+MAX_IMG_SIZE = 10
+# MAX_IMG_SIZE = 2 # for debugging
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int, default=200, help='number of epochs of training')
@@ -51,13 +48,19 @@ parser.add_argument('--threshold', type=float, default=0.01, help='the convergen
 parser.add_argument('--job_name', type=str, default="",
                     help='the user-defined job name, which will be used to name the output files.')
 parser.add_argument('--outdir', type=str, default=".", help='the directory for output.')
-parser.add_argument('--dropout_shape', type=int, default=1, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
+parser.add_argument('--dropout_shape', type=int, default=2, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
 parser.add_argument('--dropout_percentile', type=int, default=65, help='the percentile under which gene expression values are more likely to be dropped out')
+parser.add_argument('--add_noise', type=bool, default=True, help='indicator to if noise should be added to the input of the generator or not')
+parser.add_argument('--partition_method', type=int, default=1, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
+parser.add_argument('--partitions_nreps', type=int, default=5, help='integer corresponding the number of repeated partitions')
+parser.add_argument('--partitions_overlap_size', type=int, default=100, help='number of overlapping genes between partitions')
 
 opt = parser.parse_args()
 max_ct_ncls = opt.ct_ncls  #
 max_t_ncls = opt.tech_ncls  #
 torch.set_num_threads(opt.n_cpu)
+if opt.img_size > MAX_IMG_SIZE:
+    opt.img_size = MAX_IMG_SIZE
 
 job_name = opt.job_name
 GANs_models = opt.outdir + '/GANs_models'
@@ -108,10 +111,52 @@ def convert_to_UMIcounts(scData):
 # opt.n_epochs = 1
 # cuda = False
 # %%
+
+class MyPartitions:
+
+    def __init__(self, d_file: str, cls_file: str, tech_file: str, partition_method: int = 0, nrepeats: int = 5, overlap_size: int = 20, transform=None):
+        """
+        Args:
+            csv_file (string): Path to the csv file with annotations.
+            root_dir (string): Directory with all the images.
+            partition_method: 0 for partitions without overlaps and without repeats
+                              1 for random partitions with repeats
+                              2 for partitions with overlaps, without repeats
+        """
+        full_data = pd.read_csv(d_file, index_col=False).drop(["Unnamed: 0"], axis=1)
+        full_ct_labels = pd.Categorical(pd.read_csv(cls_file, header=None, index_col=False).iloc[:,0]).codes
+        full_tech_labels = pd.Categorical(pd.read_csv(tech_file, header=None, index_col=False).iloc[:,0]).codes
+
+        self.partitions = []
+        n_repeats = 1 if partition_method == 0 else nrepeats
+        n_genes = full_data.shape[0]
+        partition_jump = opt.img_size**2
+        partition_size = opt.img_size**2
+        if partition_method == 2:
+            partition_jump -= overlap_size
+        for rep in range(n_repeats):
+            partition = []
+            shuffled_gene_indices = full_data.index.tolist()
+            if partition_method == 1:
+                random.shuffle(shuffled_gene_indices)
+            full_data_to_partition = full_data.iloc[shuffled_gene_indices]
+            for i in range(0, n_genes, partition_jump):
+                data = full_data_to_partition.iloc[i:i+partition_size, :]
+                gene_indices = data.index.tolist()
+                dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
+                partition.append((dataset, gene_indices))
+            print(f"created {len(partition):,} partitions ofr repeat {rep}...")
+            self.partitions.append(partition)
+
+    def __len__(self):
+        return len(self.partitions)
+
+
+
 class MyDataset(Dataset):
     """Operations with the datasets."""
 
-    def __init__(self, d_file, cls_file, tech_file, transform=None):
+    def __init__(self, data, ct_labels, tech_labels, transform=None):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -119,11 +164,9 @@ class MyDataset(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
-        self.data = pd.read_csv(d_file, header=0, index_col=0)
-        d = pd.read_csv(cls_file, header=None, index_col=False)  #
-        t = pd.read_csv(tech_file, header=None, index_col=False)  #
-        self.data_cls = pd.Categorical(d.iloc[:, 0]).codes  #
-        self.data_technology = pd.Categorical(t.iloc[:, 0]).codes
+        self.data = data
+        self.data_cls = ct_labels
+        self.data_technology = tech_labels
         self.transform = transform
         self.fig_h = opt.img_size  ##
 
@@ -368,16 +411,17 @@ generator.apply(weights_init_normal)
 discriminator.apply(weights_init_normal)
 
 # Configure data loader
-transformed_dataset = MyDataset(d_file=opt.file_d,
-                                cls_file=opt.file_c,
-                                tech_file=opt.file_t,
-                                transform=transforms.Compose([
-                                    #                                               Rescale(256),
-                                    #                                               RandomCrop(224),
-                                    ToTensor()
-                                ]))
-dataloader = DataLoader(transformed_dataset, batch_size=opt.batch_size,
-                        shuffle=True, num_workers=0, drop_last=True)
+transformed_datasets_partitions = MyPartitions(d_file=opt.file_d,
+                                               cls_file=opt.file_c,
+                                               tech_file=opt.file_t,
+                                               partition_method=opt.partition_method,
+                                               nrepeats=opt.partitions_nreps,
+                                               overlap_size=opt.partitions_overlap_size,
+                                               transform=transforms.Compose([
+                                                    #                                               Rescale(256),
+                                                    #                                               RandomCrop(224),
+                                                    ToTensor()
+                                                ]))
 
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -394,6 +438,8 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 gamma = opt.gamma
 lambda_k = 0.001
 k = opt.kt
+
+nreps = len(transformed_datasets_partitions)
 
 if opt.train:
     model_exists = os.path.isfile(GANs_models + '/' + model_basename + '-g.pt')
@@ -415,105 +461,114 @@ if opt.train:
     max_M = sys.float_info.max
     min_dM = 0.001
     dM = 1
+    z_vals = []
     for epoch in range(opt.n_epochs):
         cur_M = 0
         cur_dM = 1
-        for i, batch_sample in enumerate(dataloader):
-            #            if i==0:
-            #                break
-            imgs = batch_sample['data'].type(Tensor)
-            cell_type_label = batch_sample['cell_type_label']
-            technology_label = batch_sample['technology_label']
-            ct_label_oh = one_hot((cell_type_label).type(torch.LongTensor), max_ct_ncls).type(Tensor)  #
-            t_label_oh = one_hot((technology_label).type(torch.LongTensor), max_t_ncls).type(Tensor)  #
+        for rep in range(nreps):
+            num_partitions = len(transformed_datasets_partitions.partitions[rep])
+            for part in range(num_partitions):
+                (transformed_dataset, gene_indices) = transformed_datasets_partitions.partitions[rep][part]
+                dataloader = DataLoader(transformed_dataset, batch_size=opt.batch_size,
+                                        shuffle=True, num_workers=0, drop_last=True)
+                for i, batch_sample in enumerate(dataloader):
+                    imgs = batch_sample['data'].type(Tensor)
+                    cell_type_label = batch_sample['cell_type_label']
+                    technology_label = batch_sample['technology_label']
+                    ct_label_oh = one_hot((cell_type_label).type(torch.LongTensor), max_ct_ncls).type(Tensor)  #
+                    t_label_oh = one_hot((technology_label).type(torch.LongTensor), max_t_ncls).type(Tensor)  #
 
-            # Configure input
-            real_imgs = Variable(imgs.type(Tensor))
+                    # Configure input
+                    real_imgs = Variable(imgs.type(Tensor))
 
-            # -----------------
-            #  Train Generator
-            # -----------------
+                    # -----------------
+                    #  Train Generator
+                    # -----------------
 
-            optimizer_G.zero_grad()
+                    optimizer_G.zero_grad()
 
-            # Sample noise as generator input
-            z = Variable(Tensor(np.random.choice(a=imgs.flatten(), size=imgs.shape[0]*opt.latent_dim).reshape(imgs.shape[0], opt.latent_dim)))
+                    # Sample noise as generator input
+                    z_orig = np.random.choice(a=imgs.flatten(), size=imgs.shape[0]*opt.latent_dim).reshape(imgs.shape[0], opt.latent_dim)
+                    z = Variable(Tensor(z_orig))
+                    if opt.add_noise:
+                        z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
+                        z = Variable(Tensor(z_orig+z_noise))
 
-            # Generate a batch of images
-            gen_imgs = generator(z, ct_label_oh, t_label_oh)
+                    # Generate a batch of images
+                    gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
-            # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
-            transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
-            binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
-            expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
-            stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
-            dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
-            # Loss measures generator's ability to fool the discriminator
-            disc_on_gen_imgs = torch.abs(discriminator(dropped_gen_imgs, ct_label_oh, t_label_oh))
-            g_loss = torch.mean(disc_on_gen_imgs - dropped_gen_imgs)
+                    # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
+                    transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
+                    binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
+                    expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
+                    stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
+                    dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
+                    # Loss measures generator's ability to fool the discriminator
+                    disc_on_gen_imgs = torch.abs(discriminator(dropped_gen_imgs, ct_label_oh, t_label_oh))
+                    g_loss = torch.mean(disc_on_gen_imgs - dropped_gen_imgs)
 
-            g_loss.backward()
-            optimizer_G.step()
+                    g_loss.backward()
+                    optimizer_G.step()
 
-            # ---------------------
-            #  Train Discriminator
-            # ---------------------
-            optimizer_D.zero_grad()
+                    # ---------------------
+                    #  Train Discriminator
+                    # ---------------------
+                    optimizer_D.zero_grad()
 
-            # Measure discriminator's ability to classify real from generated samples
-            d_real = discriminator(real_imgs, ct_label_oh, t_label_oh)
-            d_fake = discriminator(dropped_gen_imgs.detach(), ct_label_oh, t_label_oh)
+                    # Measure discriminator's ability to classify real from generated samples
+                    d_real = discriminator(real_imgs, ct_label_oh, t_label_oh)
+                    d_fake = discriminator(dropped_gen_imgs.detach(), ct_label_oh, t_label_oh)
 
-            d_loss_real = torch.mean(torch.abs(d_real - real_imgs))
-            d_loss_fake = torch.mean(torch.abs(d_fake - dropped_gen_imgs.detach()))
-            d_loss = d_loss_real - k * d_loss_fake
+                    d_loss_real = torch.mean(torch.abs(d_real - real_imgs))
+                    d_loss_fake = torch.mean(torch.abs(d_fake - dropped_gen_imgs.detach()))
+                    d_loss = d_loss_real - k * d_loss_fake
 
-            d_loss.backward()
-            optimizer_D.step()
+                    d_loss.backward()
+                    optimizer_D.step()
 
-            # ----------------
-            # Update weights
-            # ----------------
+                    # ----------------
+                    # Update weights
+                    # ----------------
 
-            diff = torch.mean(gamma * d_loss_real - d_loss_fake)
+                    diff = torch.mean(gamma * d_loss_real - d_loss_fake)
 
-            # Update weight term for fake samples
-            k = k + lambda_k * np.asscalar(diff.detach().data.cpu().numpy())
-            k = min(max(k, 0), 1)  # Constraint to interval [0, 1]
+                    # Update weight term for fake samples
+                    k = k + lambda_k * np.asscalar(diff.detach().data.cpu().numpy())
+                    k = min(max(k, 0), 1)  # Constraint to interval [0, 1]
 
-            # Update convergence metric
-            M = (d_loss_real + torch.abs(diff)).item()
-            cur_M += M
-            # --------------
-            # Log Progress
-            # --------------
+                    # Update convergence metric
+                    M = (d_loss_real + torch.abs(diff)).item()
+                    cur_M += M
+                    # --------------
+                    # Log Progress
+                    # --------------
 
-            sys.stdout.write("\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] -- M: %f, delta_M: %f,k: %f" % (
-            epoch + 1, opt.n_epochs, i + 1, len(dataloader),
-            np.asscalar(d_loss.detach().data.cpu().numpy()), np.asscalar(g_loss.detach().data.cpu().numpy()),
-            M, dM, k))
-            sys.stdout.flush()
-            batches_done = epoch * len(dataloader) + i
-        # get the M of current epoch
-        cur_M = cur_M / len(dataloader)
-        if cur_M < max_M:  # if current model is better than previous one
-            torch.save(discriminator.state_dict(), GANs_models + '/' + model_basename + '-d.pt')
-            torch.save(generator.state_dict(), GANs_models + '/' + model_basename + '-g.pt')
-            dM = min(max_M - cur_M, cur_M)
-            if dM < min_dM:  # if convergence threshold meets, stop training
-                print(
-                    "Training was stopped after " + str(epoch + 1) + " epochs since the convergence threshold (" + str(
-                        min_dM) + ".) reached: " + str(dM))
-                break
-            cur_dM = max_M - cur_M
-            max_M = cur_M
-        if epoch + 1 == opt.n_epochs and cur_dM > min_dM:
-            print("Training was stopped after " + str(epoch + 1) + " epochs since the maximum epochs reached: " + str(
-                opt.n_epochs) + ".")
-            print("WARNING: the convergence threshold (" + str(min_dM) + ") was not met. Current value is: " + str(
-                cur_dM))
-            print("You may need more epochs to get the most optimal model!!!")
-
+                    sys.stdout.write("\r[Epoch %d/%d] [Repeat %d/%d] [Partition %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] -- M: %f, delta_M: %f,k: %f" % (
+                    epoch + 1, opt.n_epochs, rep+1, nreps, part+1, num_partitions, i + 1, len(dataloader),
+                    np.asscalar(d_loss.detach().data.cpu().numpy()), np.asscalar(g_loss.detach().data.cpu().numpy()),
+                    M, dM, k))
+                    sys.stdout.flush()
+                    batches_done = epoch * len(dataloader) + i
+                # get the M of current epoch
+                cur_M = cur_M / len(dataloader)
+                if cur_M < max_M:  # if current model is better than previous one
+                    torch.save(discriminator.state_dict(), GANs_models + '/' + model_basename + '-d.pt')
+                    torch.save(generator.state_dict(), GANs_models + '/' + model_basename + '-g.pt')
+                    dM = min(max_M - cur_M, cur_M)
+                    if dM < min_dM:  # if convergence threshold meets, stop training
+                        print(
+                            "Training was stopped after " + str(epoch + 1) + " epochs since the convergence threshold (" + str(
+                                min_dM) + ".) reached: " + str(dM))
+                        break
+                    cur_dM = max_M - cur_M
+                    max_M = cur_M
+                if epoch + 1 == opt.n_epochs and cur_dM > min_dM:
+                    print("Training was stopped after " + str(epoch + 1) + " epochs since the maximum epochs reached: " + str(
+                        opt.n_epochs) + ".")
+                    print("WARNING: the convergence threshold (" + str(min_dM) + ") was not met. Current value is: " + str(
+                        cur_dM))
+                    print("You may need more epochs to get the most optimal model!!!")
+imputed_datasets = []
 if opt.impute:
     if opt.gpt == '':
         model_g = GANs_models + '/' + model_basename + '-g.pt'
@@ -532,37 +587,46 @@ if opt.impute:
     else:
         # discriminator.load_state_dict(torch.load(opt.dpt, map_location=lambda storage, loc: storage))
         generator.load_state_dict(torch.load(model_g, map_location=lambda storage, loc: storage))
-    ######################################################
-    ###        impute by type
-    ######################################################
-    sim_size = opt.sim_size
-    sim_out = list()
-    for i in range(opt.ct_ncls):
-      ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
-      sim_out.append(list())
-      for j in range(opt.tech_ncls):
-          t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
+    #############################################################
+    ###        impute by cell type and technology type        ###
+    #############################################################
 
-          # Sample noise as generator input
-          imgs = transformed_dataset.data["data"]
-          z = Variable(Tensor(np.random.choice(a=imgs.flatten(), size=sim_size*opt.latent_dim).reshape(sim_size, opt.latent_dim)))
+    for rep in range(len(transformed_datasets_partitions.partitions)):
+        orig_data = pd.read_csv(opt.file_d)
+        imputed_data = pd.DataFrame(index=orig_data.index, columns=orig_data.columns)
 
-          # Generate a batch of images
-          fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
-          sim_out[i].append(fake_imgs)
-    mydataset = MyDataset(d_file=opt.file_d,
-                          cls_file=opt.file_c,
-                          tech_file=opt.file_t)
-    print(f"# cells = {len(mydataset)}")
-    print(f"# size of a single cell = {mydataset[0]['data'].shape}")
-    data_imp_org = np.asarray(
-        [mydataset[i]['data'].reshape((opt.img_size * opt.img_size)) for i in range(len(mydataset))]).T
-    data_imp = data_imp_org.copy()
+        for (transformed_dataset, gene_indices) in transformed_datasets_partitions.partitions[rep]:
+            mydataset = transformed_dataset.copy()
+            data_imp_org = np.asarray(
+                [mydataset[i]['data'].reshape((opt.img_size * opt.img_size)) for i in range(len(mydataset))]).T
+            data_imp = data_imp_org.copy()
 
-    # by type
-    sim_out_org = sim_out
-    rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['cell_type_label']) - 1][int(mydataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in
-            range(len(mydataset))]
-    pd.DataFrame(rels).to_csv(
-        os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
+            sim_size = opt.sim_size
+            sim_out = list()
+            for i in range(opt.ct_ncls):
+              ct_label_oh = one_hot(torch.from_numpy(np.repeat(i, sim_size)).type(torch.LongTensor), max_ct_ncls).type(Tensor)
+              sim_out.append(list())
+              for j in range(opt.tech_ncls):
+                  t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
+
+                  # Sample noise as generator input
+                  z_orig = np.random.choice(a=data_imp_org.flatten(), size=sim_size*opt.latent_dim).reshape(sim_size, opt.latent_dim)
+                  z = Variable(Tensor(z_orig))
+                  if opt.add_noise:
+                      z_noise = np.random.normal(0, 1, (sim_size, opt.latent_dim))
+                      z = Variable(Tensor(z_orig + z_noise))
+
+                  # Generate a batch of images
+                  fake_imgs = generator(z, ct_label_oh, t_label_oh).detach().data.cpu().numpy()
+                  sim_out[i].append(fake_imgs)
+
+            # by type
+            sim_out_org = sim_out
+            rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['cell_type_label']) - 1][int(mydataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in range(len(mydataset))]
+            rels_df = pd.DataFrame(rels)
+            imputed_data.update(rels)
+        imputed_datasets.append(imputed_data)
+
+    full_imputed_data = pd.DataFrame(np.nanmean([data.to_numpy() for data in imputed_datasets]))
+    full_imputed_data.to_csv(os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
 
