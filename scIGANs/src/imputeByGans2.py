@@ -51,7 +51,7 @@ parser.add_argument('--outdir', type=str, default=".", help='the directory for o
 parser.add_argument('--dropout_shape', type=int, default=2, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
 parser.add_argument('--dropout_percentile', type=int, default=65, help='the percentile under which gene expression values are more likely to be dropped out')
 parser.add_argument('--add_noise', type=bool, default=True, help='indicator to if noise should be added to the input of the generator or not')
-parser.add_argument('--partition_method', type=int, default=1, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
+parser.add_argument('--partition_method', type=int, default=0, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
 parser.add_argument('--partitions_nreps', type=int, default=5, help='integer corresponding the number of repeated partitions')
 parser.add_argument('--partitions_overlap_size', type=int, default=100, help='number of overlapping genes between partitions')
 
@@ -145,7 +145,7 @@ class MyPartitions:
                 gene_indices = data.index.tolist()
                 dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
                 partition.append((dataset, gene_indices))
-            print(f"created {len(partition):,} partitions ofr repeat {rep}...")
+            print(f"created {len(partition):,} partitions for repeat {rep}...")
             self.partitions.append(partition)
 
     def __len__(self):
@@ -568,8 +568,9 @@ if opt.train:
                     print("WARNING: the convergence threshold (" + str(min_dM) + ") was not met. Current value is: " + str(
                         cur_dM))
                     print("You may need more epochs to get the most optimal model!!!")
-imputed_datasets = []
+
 if opt.impute:
+    imputed_datasets = []
     if opt.gpt == '':
         model_g = GANs_models + '/' + model_basename + '-g.pt'
         model_exists = os.path.isfile(model_g)
@@ -592,15 +593,11 @@ if opt.impute:
     #############################################################
 
     for rep in range(len(transformed_datasets_partitions.partitions)):
-        orig_data = pd.read_csv(opt.file_d)
-        imputed_data = pd.DataFrame(index=orig_data.index, columns=orig_data.columns)
-
+        imputed_data = []
         for (transformed_dataset, gene_indices) in transformed_datasets_partitions.partitions[rep]:
-            mydataset = transformed_dataset.copy()
             data_imp_org = np.asarray(
-                [mydataset[i]['data'].reshape((opt.img_size * opt.img_size)) for i in range(len(mydataset))]).T
+                [transformed_dataset[i]['data'].numpy().reshape((opt.img_size * opt.img_size)) for i in range(len(transformed_dataset))]).T
             data_imp = data_imp_org.copy()
-
             sim_size = opt.sim_size
             sim_out = list()
             for i in range(opt.ct_ncls):
@@ -622,11 +619,15 @@ if opt.impute:
 
             # by type
             sim_out_org = sim_out
-            rels = [my_knn_type(data_imp_org[:, k], sim_out_org[int(mydataset[k]['cell_type_label']) - 1][int(mydataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in range(len(mydataset))]
+            rels = np.asarray([my_knn_type(data_imp_org[:, k], sim_out_org[int(transformed_dataset[k]['cell_type_label']) - 1][int(transformed_dataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in range(len(transformed_dataset))]).transpose()
             rels_df = pd.DataFrame(rels)
-            imputed_data.update(rels)
+            rels_df.index = gene_indices
+            imputed_data.append(rels_df)
+        imputed_data = pd.concat(imputed_data).sort_index()
         imputed_datasets.append(imputed_data)
 
-    full_imputed_data = pd.DataFrame(np.nanmean([data.to_numpy() for data in imputed_datasets]))
-    full_imputed_data.to_csv(os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv')  # imputed data
+    full_imputed_data = pd.concat(imputed_datasets)
+    full_imputed_data = full_imputed_data.reset_index()
+    full_imputed_data = full_imputed_data.groupby('index').mean()
+    full_imputed_data.to_csv(os.path.dirname(os.path.abspath(opt.file_d)) + '/scIGANs-' + job_name + '.csv', header=None, index=False)  # imputed data
 
