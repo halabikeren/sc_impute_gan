@@ -3,6 +3,7 @@
 from __future__ import print_function, division
 import argparse
 import os
+import pickle
 import random
 
 import numpy as np
@@ -54,7 +55,8 @@ parser.add_argument('--add_noise', type=bool, default=False, help='indicator to 
 parser.add_argument('--do_partition', type=bool, default=True, help='indicator weather partitioning of the data should be applied or not')
 parser.add_argument('--partition_method', type=int, default=0, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
 parser.add_argument('--partitions_nreps', type=int, default=5, help='integer corresponding the number of repeated partitions')
-parser.add_argument('--partitions_overlap_size', type=int, default=100, help='number of overlapping genes between partitions')
+parser.add_argument('--partitions_overlap_size', type=int, default=20, help='integer corresponding the number of overlapping genes between consecutive partitions')
+
 
 opt = parser.parse_args()
 max_ct_ncls = opt.ct_ncls  #
@@ -148,7 +150,18 @@ class MyPartitions:
                 full_data_to_partition = full_data.iloc[shuffled_gene_indices]
                 covered_indices = []
                 for i in range(0, n_genes, partition_jump):
-                    data = full_data_to_partition.iloc[i:i+partition_size, :]
+                    start = i
+                    end = i+partition_size
+                    if end > full_data_to_partition.shape[0]: # end must we a second power of some number to enable transformation of each cell's data to a square image
+                        n_missing_at_end = end-full_data_to_partition.shape[0]+1
+                        start -= n_missing_at_end
+                        if start < 0: # addition of another partition of full size is not possible
+                            continue
+                        end -= n_missing_at_end
+                    assert(end-start == partition_size)
+                    print(f"start = {start}, end={end}, ngenes = {full_data_to_partition.shape[0]}")
+                    data = full_data_to_partition.iloc[start:end, :]
+                    print(f"data size = {data.shape}")
                     gene_indices = data.index.tolist()
                     covered_indices += gene_indices
                     dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
@@ -177,7 +190,9 @@ class MyDataset(Dataset):
         self.data_cls = ct_labels
         self.data_technology = tech_labels
         self.transform = transform
-        self.fig_h = opt.img_size  ##
+        self.fig_h = opt.img_size
+        print(f"data size = {data.shape}")
+        print(f"self.fig_h = {self.fig_h}")
 
     def __len__(self):
         return len(self.data_cls)
@@ -389,10 +404,12 @@ class Discriminator(nn.Module):
 def my_knn_type(data_imp_org_k, sim_out_k, knn_k=10):
     sim_size = sim_out_k.shape[0]
     out = data_imp_org_k.copy()
-    q1k = data_imp_org_k.reshape((opt.img_size * opt.img_size, 1))
+    ngenes = data_imp_org_k.shape[0]
+    sqrt_ngenes = int(np.sqrt(ngenes))
+    q1k = data_imp_org_k.reshape((ngenes, 1))
     q1kl = np.int8(q1k > 0)  # get which part in cell k is >0
     q1kn = np.repeat(q1k * q1kl, repeats=sim_size, axis=1)  # get >0 part of cell k
-    sim_out_tmp = sim_out_k.reshape((sim_size, opt.img_size * opt.img_size)).T
+    sim_out_tmp = sim_out_k[:sim_size,:1, :sqrt_ngenes, :sqrt_ngenes].reshape((sim_size, ngenes)).T
     sim_outn = sim_out_tmp * np.repeat(q1kl, repeats=sim_size, axis=1)  # get the >0 part of simmed ones
     diff = q1kn - sim_outn  # distance of cell k to simmed ones
     diff = diff * diff
@@ -420,15 +437,22 @@ generator.apply(weights_init_normal)
 discriminator.apply(weights_init_normal)
 
 # Configure data loader
-transformed_datasets_partitions = MyPartitions(d_file=opt.file_d,
-                                               cls_file=opt.file_c,
-                                               tech_file=opt.file_t,
-                                               partition_method=opt.partition_method,
-                                               nrepeats=opt.partitions_nreps,
-                                               overlap_size=opt.partitions_overlap_size,
-                                               transform=transforms.Compose([
-                                                    ToTensor()
-                                                ]))
+partitioned_data_path = f"{opt.outdir}/partitioned_data.pkl"
+if os.path.exists(partitioned_data_path):
+    with open(partitioned_data_path, "rb") as f:
+        transformed_datasets_partitions = pickle.load(f)
+else:
+    transformed_datasets_partitions = MyPartitions(d_file=opt.file_d,
+                                                   cls_file=opt.file_c,
+                                                   tech_file=opt.file_t,
+                                                   partition_method=opt.partition_method,
+                                                   nrepeats=opt.partitions_nreps,
+                                                   overlap_size=opt.partitions_overlap_size,
+                                                   transform=transforms.Compose([
+                                                        ToTensor()
+                                                    ]))
+    with open(partitioned_data_path, "wb") as f:
+        pickle.dump(transformed_datasets_partitions, f)
 
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -496,7 +520,11 @@ if opt.train:
 
                     # Sample noise as generator input - in case of partitioning, subsample size should be 100%
                     if opt.input_image and opt.do_partition and len(imgs.flatten()) < imgs.shape[0]*opt.latent_dim:
-                        raise ValueError("image size larger than noise size despite of pairtiotioning")
+                        print(f"partition index = {part}")
+                        print(f"imgs.shape = {imgs.shape}")
+                        print(f"len(imgs.flatten()) = {len(imgs.flatten())}")
+                        print(f"imgs.shape[0]*opt.latent_dim = {imgs.shape[0]*opt.latent_dim}")
+                        raise ValueError("image size larger than noise size despite of partitioning")
                     z_orig = np.random.choice(a=imgs.flatten(), size=imgs.shape[0]*opt.latent_dim).reshape(imgs.shape[0], opt.latent_dim)
                     z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
                     if not opt.input_image:
@@ -611,8 +639,7 @@ if opt.impute:
     for rep in range(len(transformed_datasets_partitions.partitions)):
         imputed_data = []
         for (transformed_dataset, gene_indices) in transformed_datasets_partitions.partitions[rep]:
-            data_imp_org = np.asarray(
-                [transformed_dataset[i]['data'].numpy().reshape((opt.img_size * opt.img_size)) for i in range(len(transformed_dataset))]).T
+            data_imp_org = np.asarray([transformed_dataset[i]['data'].numpy().reshape((partition_size)) for i in range(len(transformed_dataset))]).T
             data_imp = data_imp_org.copy()
             sim_size = opt.sim_size
             sim_out = list()
@@ -623,11 +650,11 @@ if opt.impute:
                   t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
 
                   # Sample noise as generator input
-                  if opt.input_image and opt.do_partition and len(imgs.flatten()) < imgs.shape[0] * opt.latent_dim:
-                      raise ValueError("image size larger than noise size despite of pairtiotioning")
+                  if opt.input_image and opt.do_partition and len(data_imp_org.flatten()) < data_imp_org.shape[0] * opt.latent_dim:
+                      raise ValueError("image size larger than noise size despite of partitioning")
                   z_orig = np.random.choice(a=data_imp_org.flatten(), size=sim_size * opt.latent_dim).reshape(
                       sim_size, opt.latent_dim)
-                  z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
+                  z_noise = np.random.normal(0, 1, (sim_size, opt.latent_dim))
                   if not opt.input_image:
                       z = Variable(Tensor(z_noise))
                   elif opt.input_image and not opt.add_noise:
@@ -644,8 +671,11 @@ if opt.impute:
             sim_out_org = sim_out
             rels = np.asarray([my_knn_type(data_imp_org[:, k], sim_out_org[int(transformed_dataset[k]['cell_type_label']) - 1][int(transformed_dataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in range(len(transformed_dataset))]).transpose()
             rels_df = pd.DataFrame(rels)
+            print(f"# gene_indices = {len(gene_indices)}")
+            print(f"rels_df shape = {rels_df.shape}")
             rels_df.index = gene_indices
             imputed_data.append(rels_df)
+        print([df.shape for df in imputed_data])
         imputed_data = pd.concat(imputed_data).sort_index()
         imputed_datasets.append(imputed_data)
 
