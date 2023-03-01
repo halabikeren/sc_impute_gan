@@ -11,8 +11,15 @@ batch_size=8 #
 PARAMS=""
 impute=""
 latent_dim=100
-threshold=0.001 ## the convergence threshold; traing will stop if the dM < threshold
+threshold=0.001 ## the convergence threshold; training will stop if the dM < threshold
 job_name=""
+input_image=0
+add_noise=0
+do_partition=0
+partition_method=0
+partitions_nreps=5
+partitions_overlap_size=80
+dropout_percentile=65
 #e_matrix=$1 ## the first argument is the input expression matrix
 help_message (){
     echo "--------------"
@@ -34,6 +41,13 @@ help_message (){
 	echo "--impute	optional	Set this option to skip training and directly impute using pretrained model for the same input settings."
 	echo "-j | --job_name <string>	optional	user-defined job name (a string without spaces), which will be used to name the output files."
 	echo "-o | --outdir <string>	optional	set the path where to write the imputed matrix. Default: current working directory (pwd)."
+	echo "-i | --input_image <integer>	indicator whether the generator should be given image data (1) or noise (0) as input. In the first case, the generator output will undergo dropout during training"
+	echo "-dp | --do_partition <integer>	indicator whether partitioning should be done or not"
+	echo "-pm | --partition_method <integer>	0 for single partition without overlaps, 1 for random partition with nrep repeats, 2 for single partition with overlaps"
+  echo "-pn | --partitions_nreps <integer> number of repetitions of partitioning"
+  echo "-po | --partitions_overlap_size <integer> number of genes in overlaps between partitions"
+  echo "-dr | --dropout_percentile <integer> percentile under which gene expression values are more likely to be dropped out"
+	echo "-n | --add_noise <integer>	indicator whether noise should be added to generator input"
     exit
 }
 
@@ -81,6 +95,34 @@ while (( "$#" )); do
     -o|--outdir)
       outdir=$2
       mkdir -p $outdir
+      shift 2
+      ;;
+      -i|--input_image)
+      input_image=$2
+      shift 2
+      ;;
+    -n|--add_noise)
+      add_noise=$2
+      shift 2
+      ;;
+    -dp|--do_partition)
+      do_partition=$2
+      shift 2
+      ;;
+    -pm|--partition_method)
+      partition_method=$2
+      shift 2
+      ;;
+    -pn|--partitions_nreps)
+      partitions_nreps=$2
+      shift 2
+      ;;
+    -po|--partitions_overlap_size)
+      partitions_overlap_size=$2
+      shift 2
+      ;;
+    -dr|--dropout_percentile)
+      dropout_percentile=$2
       shift 2
       ;;
     --impute)
@@ -173,14 +215,14 @@ then
 	echo ""
 	echo "Command for training:" >> $logfile
 	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train --job_name $job_name --outdir $outdir  #2>&1 | tee -a $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --batch_size=$batch_size --latent_dim=$latent_dim --threshold=$threshold --train --job_name $job_name --outdir $outdir --input_image $input_image --add_noise $add_noise --do_partition $do_partition --partition_method $partition_method --partitions_nreps $partitions_nreps --partitions_overlap_size $partitions_overlap_size --dropout_percentile $dropout_percentile #2>&1 | tee -a $logfile
 	echo "Imputing..."
 	echo "" >> $logfile
 	echo $(date)"	Imputing..." >> $logfile
 	echo ""
 	echo "Command for Imputing:" >> $logfile
 	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir --input_image $input_image --add_noise $add_noise --do_partition $do_partition --partition_method $partition_method --partitions_nreps $partitions_nreps --partitions_overlap_size $partitions_overlap_size --dropout_percentile $dropout_percentile #2>&1 | tee -a $logfile
 else
 	echo "Imputing..."
 	echo "" >> $logfile
@@ -188,7 +230,7 @@ else
 	echo ""
 	echo "Command for Imputing:" >> $logfile
 	echo "	"--file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute >> $logfile
-	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir #2>&1 | tee -a $logfile
+	$python_path ${Bashdir}/src/imputeByGans2.py --file_d=$tmpdir/${fname} --file_c=$ct_label --file_t=$tech_label --ct_ncls=$ct_ncls --tech_ncls=$tech_ncls --img_size=$img_size --n_epochs=$epochs --sim_size=$sim_size --knn_k=$knn_k --latent_dim=$latent_dim --impute --job_name $job_name --outdir $outdir --input_image $input_image --add_noise $add_noise --do_partition $do_partition --partition_method $partition_method --partitions_nreps $partitions_nreps --partitions_overlap_size $partitions_overlap_size --dropout_percentile $dropout_percentile #2>&1 | tee -a $logfile
 fi
 if [ $? -eq 0 ]
 then

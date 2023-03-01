@@ -15,8 +15,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 OMP_NUM_THREADS=1
-MAX_IMG_SIZE = 10
-# MAX_IMG_SIZE = 2 # for debugging
+MAX_IMG_SIZE = 10 #(should be sqrt of default opt.latent_dim)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int, default=200, help='number of epochs of training')
@@ -48,9 +47,10 @@ parser.add_argument('--threshold', type=float, default=0.01, help='the convergen
 parser.add_argument('--job_name', type=str, default="",
                     help='the user-defined job name, which will be used to name the output files.')
 parser.add_argument('--outdir', type=str, default=".", help='the directory for output.')
+parser.add_argument('--input_image', type=bool, default=True, help="indicator whether image data should be given as input to the generator and then the output will undergo dropout during training. if False, only noise will be given as input")
 parser.add_argument('--dropout_shape', type=int, default=2, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
 parser.add_argument('--dropout_percentile', type=int, default=65, help='the percentile under which gene expression values are more likely to be dropped out')
-parser.add_argument('--add_noise', type=bool, default=True, help='indicator to if noise should be added to the input of the generator or not')
+parser.add_argument('--add_noise', type=bool, default=False, help='indicator to if noise should be added to the input of the generator or not')
 parser.add_argument('--do_partition', type=bool, default=True, help='indicator weather partitioning of the data should be applied or not')
 parser.add_argument('--partition_method', type=int, default=0, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
 parser.add_argument('--partitions_nreps', type=int, default=5, help='integer corresponding the number of repeated partitions')
@@ -494,22 +494,31 @@ if opt.train:
 
                     optimizer_G.zero_grad()
 
-                    # Sample noise as generator input
+                    # Sample noise as generator input - in case of partitioning, subsample size should be 100%
+                    if opt.input_image and opt.do_partition and len(imgs.flatten()) < imgs.shape[0]*opt.latent_dim:
+                        raise ValueError("image size larger than noise size despite of pairtiotioning")
                     z_orig = np.random.choice(a=imgs.flatten(), size=imgs.shape[0]*opt.latent_dim).reshape(imgs.shape[0], opt.latent_dim)
-                    z = Variable(Tensor(z_orig))
-                    if opt.add_noise:
+                    z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
+                    if not opt.input_image:
+                        z = Variable(Tensor(z_noise))
+                    elif opt.input_image and not opt.add_noise:
+                        z = Variable(Tensor(z_orig))
+                    elif opt.input_image and  opt.add_noise:
                         z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
                         z = Variable(Tensor(z_orig+z_noise))
 
                     # Generate a batch of images
                     gen_imgs = generator(z, ct_label_oh, t_label_oh)
 
-                    # # # TO DO - add dropout using https://github.com/PayamDiba/SERGIO/blob/master/SERGIO/sergio.py
-                    transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
-                    binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
-                    expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
-                    stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
-                    dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
+                    # add dropouts in case if input_image:
+                    if opt.input_image:
+                        transformed_gen_imgs = gen_imgs.reshape((-1, opt.img_size * opt.img_size)).detach().numpy().T
+                        binary_ind = dropout_indicator(transformed_gen_imgs, opt.dropout_shape, opt.dropout_percentile) # ? gen_imgs is not s matrix with rows representing genes and columns representing cells
+                        expr_O_L_D = np.multiply(binary_ind, transformed_gen_imgs)
+                        stacked_expr_O_L_D = np.asarray([expr_O_L_D[:, idx][0:(opt.img_size * opt.img_size), ].reshape(1, opt.img_size, opt.img_size).astype('double') for idx in range(expr_O_L_D.shape[1])])
+                        dropped_gen_imgs = torch.Tensor(stacked_expr_O_L_D)
+                    else:
+                        dropped_gen_imgs = gen_imgs
                     # Loss measures generator's ability to fool the discriminator
                     disc_on_gen_imgs = torch.abs(discriminator(dropped_gen_imgs, ct_label_oh, t_label_oh))
                     g_loss = torch.mean(disc_on_gen_imgs - dropped_gen_imgs)
@@ -614,9 +623,16 @@ if opt.impute:
                   t_label_oh = one_hot(torch.from_numpy(np.repeat(j, sim_size)).type(torch.LongTensor), max_t_ncls).type(Tensor)
 
                   # Sample noise as generator input
-                  z_orig = np.random.choice(a=data_imp_org.flatten(), size=sim_size*opt.latent_dim).reshape(sim_size, opt.latent_dim)
-                  z = Variable(Tensor(z_orig))
-                  if opt.add_noise:
+                  if opt.input_image and opt.do_partition and len(imgs.flatten()) < imgs.shape[0] * opt.latent_dim:
+                      raise ValueError("image size larger than noise size despite of pairtiotioning")
+                  z_orig = np.random.choice(a=data_imp_org.flatten(), size=sim_size * opt.latent_dim).reshape(
+                      sim_size, opt.latent_dim)
+                  z_noise = np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))
+                  if not opt.input_image:
+                      z = Variable(Tensor(z_noise))
+                  elif opt.input_image and not opt.add_noise:
+                      z = Variable(Tensor(z_orig))
+                  elif opt.input_image and opt.add_noise:
                       z_noise = np.random.normal(0, 1, (sim_size, opt.latent_dim))
                       z = Variable(Tensor(z_orig + z_noise))
 
