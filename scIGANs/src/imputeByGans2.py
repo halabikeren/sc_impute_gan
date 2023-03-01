@@ -51,6 +51,7 @@ parser.add_argument('--outdir', type=str, default=".", help='the directory for o
 parser.add_argument('--dropout_shape', type=int, default=2, help='shape parameter for logit function on dropout values on which binomial distribution is applied')
 parser.add_argument('--dropout_percentile', type=int, default=65, help='the percentile under which gene expression values are more likely to be dropped out')
 parser.add_argument('--add_noise', type=bool, default=True, help='indicator to if noise should be added to the input of the generator or not')
+parser.add_argument('--do_partition', type=bool, default=True, help='indicator weather partitioning of the data should be applied or not')
 parser.add_argument('--partition_method', type=int, default=0, help='integer corresponding to partition method 0 for partitions without overlaps and without repeats, 1 for random partitions with repeats, 2 for partitions with overlaps, without repeats')
 parser.add_argument('--partitions_nreps', type=int, default=5, help='integer corresponding the number of repeated partitions')
 parser.add_argument('--partitions_overlap_size', type=int, default=100, help='number of overlapping genes between partitions')
@@ -128,28 +129,33 @@ class MyPartitions:
         full_tech_labels = pd.Categorical(pd.read_csv(tech_file, header=None, index_col=False).iloc[:,0]).codes
 
         self.partitions = []
-        n_repeats = 1 if partition_method == 0 else nrepeats
-        n_genes = full_data.shape[0]
-        partition_jump = opt.img_size**2
-        partition_size = opt.img_size**2
-        if partition_method == 2:
-            partition_jump -= overlap_size
-        for rep in range(n_repeats):
-            partition = []
-            shuffled_gene_indices = full_data.index.tolist()
-            if partition_method == 1:
-                random.shuffle(shuffled_gene_indices)
-            full_data_to_partition = full_data.iloc[shuffled_gene_indices]
-            covered_indices = []
-            for i in range(0, n_genes, partition_jump):
-                data = full_data_to_partition.iloc[i:i+partition_size, :]
-                gene_indices = data.index.tolist()
-                covered_indices += gene_indices
-                dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
-                partition.append((dataset, gene_indices))
-            assert(len(set(covered_indices)) == len(set(shuffled_gene_indices)))
-            print(f"created {len(partition):,} partitions for repeat {rep}...")
-            self.partitions.append(partition)
+        if not opt.do_partition:
+            all_gene_indices = full_data.index.tolist()
+            dataset = MyDataset(data=full_data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
+            self.partitions.append((dataset, all_gene_indices))
+        else:
+            n_repeats = 1 if partition_method == 0 else nrepeats
+            n_genes = full_data.shape[0]
+            partition_jump = opt.img_size**2
+            partition_size = opt.img_size**2
+            if partition_method == 2:
+                partition_jump -= overlap_size
+            for rep in range(n_repeats):
+                partition = []
+                shuffled_gene_indices = full_data.index.tolist()
+                if partition_method == 1:
+                    random.shuffle(shuffled_gene_indices)
+                full_data_to_partition = full_data.iloc[shuffled_gene_indices]
+                covered_indices = []
+                for i in range(0, n_genes, partition_jump):
+                    data = full_data_to_partition.iloc[i:i+partition_size, :]
+                    gene_indices = data.index.tolist()
+                    covered_indices += gene_indices
+                    dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
+                    partition.append((dataset, gene_indices))
+                assert(len(set(covered_indices)) == len(set(shuffled_gene_indices)))
+                print(f"created {len(partition):,} partitions for repeat {rep}...")
+                self.partitions.append(partition)
 
     def __len__(self):
         return len(self.partitions)
