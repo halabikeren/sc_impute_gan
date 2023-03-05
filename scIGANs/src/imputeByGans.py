@@ -30,7 +30,7 @@ parser.add_argument('--gamma', type=float, default=0.95, help='gamma parameters'
 parser.add_argument('--lr', type=float, default=0.0002, help='adam: learning rate')
 parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
 parser.add_argument('--b2', type=float, default=0.999, help='adam: decay of first order momentum of gradient')
-#parser.add_argument('--n_cpu', type=int, default=20, help='number of cpu threads to use during batch generation')
+parser.add_argument('--n_cpu', type=int, default=5, help='number of cpu threads to use during batch generation')
 parser.add_argument('--latent_dim', type=int, default=100, help='dimensionality of the latent space')
 parser.add_argument('--img_size', type=int, default=100, help='size of each image dimension')
 parser.add_argument('--channels', type=int, default=1, help='number of image channels')
@@ -55,6 +55,7 @@ opt = parser.parse_args()
 max_ncls = opt.ncls  # 
 
 job_name = opt.job_name
+torch.set_num_threads(opt.n_cpu)
 GANs_models = opt.outdir+'/GANs_models'
 if (job_name == ""):
     job_name=os.path.basename(opt.file_d)+"-"+os.path.basename(opt.file_c)
