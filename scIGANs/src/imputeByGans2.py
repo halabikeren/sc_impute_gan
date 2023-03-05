@@ -153,20 +153,18 @@ class MyPartitions:
                     start = i
                     end = i+partition_size
                     if end > full_data_to_partition.shape[0]: # end must we a second power of some number to enable transformation of each cell's data to a square image
-                        n_missing_at_end = end-full_data_to_partition.shape[0]+1
+                        n_missing_at_end = end-full_data_to_partition.shape[0]
                         start -= n_missing_at_end
                         if start < 0: # addition of another partition of full size is not possible
                             continue
                         end -= n_missing_at_end
                     assert(end-start == partition_size)
-                    print(f"start = {start}, end={end}, ngenes = {full_data_to_partition.shape[0]}")
                     data = full_data_to_partition.iloc[start:end, :]
-                    print(f"data size = {data.shape}")
                     gene_indices = data.index.tolist()
                     covered_indices += gene_indices
                     dataset = MyDataset(data=data, ct_labels=full_ct_labels, tech_labels=full_tech_labels, transform=transform)
                     partition.append((dataset, gene_indices))
-                assert(len(set(covered_indices)) == len(set(shuffled_gene_indices)))
+                assert(len(set(shuffled_gene_indices)-set(covered_indices)) == 0)
                 print(f"created {len(partition):,} partitions for repeat {rep}...")
                 self.partitions.append(partition)
 
@@ -191,8 +189,6 @@ class MyDataset(Dataset):
         self.data_technology = tech_labels
         self.transform = transform
         self.fig_h = opt.img_size
-        print(f"data size = {data.shape}")
-        print(f"self.fig_h = {self.fig_h}")
 
     def __len__(self):
         return len(self.data_cls)
@@ -639,7 +635,7 @@ if opt.impute:
     for rep in range(len(transformed_datasets_partitions.partitions)):
         imputed_data = []
         for (transformed_dataset, gene_indices) in transformed_datasets_partitions.partitions[rep]:
-            data_imp_org = np.asarray([transformed_dataset[i]['data'].numpy().reshape((partition_size)) for i in range(len(transformed_dataset))]).T
+            data_imp_org = np.asarray([transformed_dataset[i]['data'].numpy().reshape((opt.img_size * opt.img_size)) for i in range(len(transformed_dataset))]).T
             data_imp = data_imp_org.copy()
             sim_size = opt.sim_size
             sim_out = list()
@@ -671,11 +667,8 @@ if opt.impute:
             sim_out_org = sim_out
             rels = np.asarray([my_knn_type(data_imp_org[:, k], sim_out_org[int(transformed_dataset[k]['cell_type_label']) - 1][int(transformed_dataset[k]['technology_label']) - 1], knn_k=opt.knn_k) for k in range(len(transformed_dataset))]).transpose()
             rels_df = pd.DataFrame(rels)
-            print(f"# gene_indices = {len(gene_indices)}")
-            print(f"rels_df shape = {rels_df.shape}")
             rels_df.index = gene_indices
             imputed_data.append(rels_df)
-        print([df.shape for df in imputed_data])
         imputed_data = pd.concat(imputed_data).sort_index()
         imputed_datasets.append(imputed_data)
 
