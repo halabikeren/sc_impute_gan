@@ -23,10 +23,10 @@ Where
 
 $G(X)'=log⁡(G(X)+1)$
 
-We note that while our loss is not optimized with respect to θ_Drop, the distribution of dropout is dependent on the gene expression values themselves, and as such, varies across datasets according to the range of gene expression values within it. Finally, the loss is defined as:
+We note that while our loss is not optimized with respect to $θ_Drop$, the distribution of dropout is dependent on the gene expression values themselves, and as such, varies across datasets according to the range of gene expression values within it. Finally, the loss is defined as:
 
  
-Where $γ$ is a hyperparameter within range [0,1] which equals $(Ε(L(Drop(G(x)))/(Ε(L(x)))$, $k_t$ is another hyperparameter within range [0,1] which corresponds to the tuning parameter of training step t, and it is learned with rate λ_k.
+Where $γ$ is a hyperparameter within range [0,1] which equals $(Ε(L(Drop(G(x)))/(Ε(L(x)))$, $k_t$ is another hyperparameter within range [0,1] which corresponds to the tuning parameter of training step t, and it is learned with rate $λ_k$.
 Notably, training the generator on the transformed images, which have generally higher dimension than noise sampled in a latent space, entails exceedingly long, and sometimes unfeasible, running times. We thus partition the scRNA-seq matrix to subsets of genes and apply the procedure on partitioned sub-datasets, transformed to images, rather than on the full data. To account for possible interactions between genes, we repeat random partitioning of the data and finally take the full imputed data to be the average of imputations across repeats. 
  
 
